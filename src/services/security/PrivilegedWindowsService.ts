@@ -35,6 +35,7 @@ export interface PrivilegedRequest {
   applicationPath?: string;
   reason: string;
   authToken: string;
+  overrideSafeguard?: boolean;
 }
 
 export interface PrivilegedResponse {
@@ -132,6 +133,7 @@ export class PrivilegedWindowsService {
             applicationPath: req.applicationPath,
             ttlSeconds: req.ttlSeconds,
             reason: req.reason,
+            overrideSafeguard: req.overrideSafeguard,
           }, { user: session.username, role: session.role, source: 'PrivilegedService' });
 
           const verify = await firewallFAL.verifyState();
@@ -141,6 +143,26 @@ export class PrivilegedWindowsService {
             executionTimeMs: Math.round(performance.now() - start),
             verifiedState: !verify.isTampered,
             resultMessage: res.success ? `Added WFP block rule for ${req.targetIpOrCidr}` : (res.error || 'Failed'),
+            error: res.error,
+          };
+        }
+
+        case 'FIREWALL_ADD_ALLOW': {
+          if (!req.targetIpOrCidr) throw new Error('Target IP/CIDR missing.');
+          const res = await firewallFAL.allow_ip(req.targetIpOrCidr, {
+            direction: req.direction,
+            protocol: req.protocol,
+            portRange: req.portRange,
+            reason: req.reason,
+          }, { user: session.username, role: session.role, source: 'PrivilegedService' });
+
+          const verify = await firewallFAL.verifyState();
+          return {
+            success: res.success,
+            actionExecuted: req.action,
+            executionTimeMs: Math.round(performance.now() - start),
+            verifiedState: !verify.isTampered,
+            resultMessage: res.success ? `Added WFP allow rule for ${req.targetIpOrCidr}` : (res.error || 'Failed'),
             error: res.error,
           };
         }

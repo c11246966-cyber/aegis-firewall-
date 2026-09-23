@@ -28,6 +28,7 @@ import {
   UserRole 
 } from '../types/aegis';
 import { authService } from '../services/security/AuthService';
+import { osDetector } from '../services/security/OsEnvironmentDetector';
 
 interface SocHeaderProps {
   status: SystemStatus;
@@ -251,20 +252,27 @@ export const SocHeader: React.FC<SocHeaderProps> = ({
           <div className="flex items-center p-1 bg-slate-900/90 border border-slate-800 rounded-md">
             {modes.map((m) => {
               const isActive = status.mode === m.id;
+              const isLocked = m.id === 'ENFORCEMENT' && !osDetector.hasPassedTests();
               return (
                 <button
                   key={m.id}
                   onClick={() => onSelectMode(m.id)}
+                  title={isLocked ? 'Locked: Backend Self-Test (RFC 1918) must be run and verified first' : m.desc}
                   className={`px-3 py-1 text-xs font-tactical font-bold tracking-wider rounded transition-all cursor-pointer ${
                     isActive
                       ? `bg-slate-950 border ${m.color} shadow-[0_0_10px_rgba(0,0,0,0.5)]`
-                      : 'text-slate-400 hover:text-slate-200'
+                      : isLocked
+                        ? 'text-slate-500 opacity-60 hover:opacity-100 hover:text-slate-300'
+                        : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   <div className="flex flex-col items-center">
-                    <span>{m.label}</span>
+                    <div className="flex items-center gap-1">
+                      {isLocked && <Lock className="w-2.5 h-2.5 text-amber-400" />}
+                      <span>{m.label}</span>
+                    </div>
                     <span className="text-[9px] font-mono-code opacity-75 font-normal">
-                      {m.desc}
+                      {isLocked ? 'Self-Test Required' : m.desc}
                     </span>
                   </div>
                 </button>

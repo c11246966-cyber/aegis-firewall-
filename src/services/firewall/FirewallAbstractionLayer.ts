@@ -25,7 +25,8 @@ import {
   FirewallBackendType,
   PlatformType,
   OperatingMode,
-  UserRole
+  UserRole,
+  WfpVerificationStatus
 } from '../../types/aegis';
 import { IFirewallBackend, RuleOptions, BackendOperationResult } from './FirewallBackend';
 import { WindowsFirewallBackend } from './WindowsFirewallBackend';
@@ -116,6 +117,10 @@ export class FirewallAbstractionLayer {
 
   public async listRules(): Promise<FirewallRule[]> {
     return await this.getActiveBackend().listRules();
+  }
+
+  public getWfpVerificationStatus(currentMode: OperatingMode): WfpVerificationStatus {
+    return this.windowsBackend.getVerificationStatus(currentMode);
   }
 
   public getTrustedManagementIps(): string[] {

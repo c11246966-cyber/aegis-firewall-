@@ -22,14 +22,20 @@ import {
   FirewallAction, 
   RuleDirection, 
   NetworkProtocol, 
-  PlatformType 
+  PlatformType,
+  OperatingMode,
+  WfpVerificationStatus
 } from '../types/aegis';
 import { validateIpOrCidr, IpValidationResult } from '../utils/ipValidator';
 import { authService } from '../services/security/AuthService';
+import { WfpVerificationPanel } from './WfpVerificationPanel';
+import { aegisStore } from '../services/aegisStore';
 
 interface NetworkControlProps {
   platform: PlatformType;
   rules: FirewallRule[];
+  mode?: OperatingMode;
+  onSelectMode?: (mode: OperatingMode) => void;
   onAddRule: (
     ipCidr: string, 
     action: FirewallAction, 
@@ -49,10 +55,21 @@ interface NetworkControlProps {
 export const NetworkControl: React.FC<NetworkControlProps> = ({
   platform,
   rules,
+  mode = 'SIMULATION',
+  onSelectMode,
   onAddRule,
   onRemoveRule,
   presetTargetIp,
 }) => {
+  const [wfpStatus, setWfpStatus] = useState<WfpVerificationStatus>(() => aegisStore.getWfpVerificationStatus());
+
+  useEffect(() => {
+    const update = () => {
+      setWfpStatus(aegisStore.getWfpVerificationStatus());
+    };
+    const unsub = aegisStore.subscribe(update);
+    return unsub;
+  }, []);
   const [targetIp, setTargetIp] = useState(presetTargetIp || '');
   const [action, setAction] = useState<FirewallAction>('DROP');
   const [direction, setDirection] = useState<RuleDirection>('INBOUND');
@@ -255,6 +272,14 @@ ${rules.map(r => {
           </span>
         </div>
       </div>
+
+      {/* Dedicated Windows WFP Verification Panel */}
+      <WfpVerificationPanel
+        status={wfpStatus}
+        mode={mode}
+        onRefreshStatus={() => setWfpStatus(aegisStore.getWfpVerificationStatus())}
+        onModeSwitch={onSelectMode}
+      />
 
       {/* Add Rule Form */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4">

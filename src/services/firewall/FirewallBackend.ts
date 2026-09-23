@@ -23,6 +23,7 @@ export interface RuleOptions {
   reason?: string;
   comment?: string;
   isTrustedManagement?: boolean;
+  overrideSafeguard?: boolean;
 }
 
 export interface BackendOperationResult {

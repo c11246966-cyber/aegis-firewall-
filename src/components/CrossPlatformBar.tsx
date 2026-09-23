@@ -21,6 +21,7 @@ import {
   FirewallHealth, 
   OperatingMode 
 } from '../types/aegis';
+import { osDetector } from '../services/security/OsEnvironmentDetector';
 
 interface CrossPlatformBarProps {
   platform: PlatformType;
@@ -42,6 +43,10 @@ export const CrossPlatformBar: React.FC<CrossPlatformBarProps> = ({
   const [verifying, setVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<string | null>(null);
   const [showEndpointsModal, setShowEndpointsModal] = useState(false);
+
+  const envInfo = osDetector.getEnvironmentInfo();
+  const isRealEnforcement = mode === 'ENFORCEMENT' && envInfo.realEnforcementCapable;
+  const backendStatusText = isRealEnforcement ? 'REAL ENFORCEMENT' : 'SIMULATION';
 
   const handleVerify = async () => {
     setVerifying(true);
@@ -93,6 +98,18 @@ export const CrossPlatformBar: React.FC<CrossPlatformBarProps> = ({
             <Layers className="w-4 h-4 text-indigo-400" />
             <span className="text-slate-400">BACKEND:</span>
             <span className="font-bold text-indigo-300">{getBackendLabel()}</span>
+          </div>
+
+          {/* Explicit Backend Status Badge */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500 font-semibold uppercase text-[10px]">BACKEND STATUS:</span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+              backendStatusText === 'REAL ENFORCEMENT'
+                ? 'bg-red-950 text-red-300 border-red-500 animate-pulse'
+                : 'bg-amber-950 text-amber-300 border-amber-500'
+            }`}>
+              {backendStatusText}
+            </span>
           </div>
         </div>
 

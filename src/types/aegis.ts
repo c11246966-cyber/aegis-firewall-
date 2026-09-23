@@ -66,7 +66,7 @@ export interface SecurityEvent {
   riskDelta: number;
   payloadPreview: string;
   rawPacketHex: string;
-  actionTaken: 'LOGGED' | 'ALERTED' | 'BLOCKED' | 'RATE_LIMITED' | 'QUARANTINED';
+  actionTaken: 'LOGGED' | 'ALERTED' | 'BLOCKED' | 'SIMULATED_BLOCK' | 'RATE_LIMITED' | 'QUARANTINED';
   blockedByRuleId?: string;
   reputationScore?: number;
   threatIntelMatch?: string;
@@ -247,4 +247,24 @@ export interface TestCaseResult {
   assertionsCount: number;
   details: string;
   errorMessage?: string;
+}
+
+export interface WfpVerificationStatus {
+  backend: string;
+  mode: OperatingMode;
+  backendStatus: 'SIMULATION' | 'REAL ENFORCEMENT';
+  service: 'RUNNING' | 'STOPPED';
+  firewallApi: 'AVAILABLE' | 'UNAVAILABLE';
+  lastRuleOperation: {
+    action: 'BLOCK' | 'UNBLOCK' | 'ALLOW';
+    status: 'SUCCESS' | 'FAILED';
+    target: string;
+    timestamp: number;
+    ruleName?: string;
+    error?: string;
+  } | null;
+  ruleVerification: 'VERIFIED' | 'NOT VERIFIED';
+  selfTestPassed: boolean;
+  isRealWindowsHost: boolean;
+  statusNote: string;
 }

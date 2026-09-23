@@ -58,13 +58,30 @@ export const EventTracker: React.FC<EventTrackerProps> = ({
   const getActionBadge = (action: SecurityEvent['actionTaken']) => {
     switch (action) {
       case 'BLOCKED':
-        return 'bg-red-950/80 text-red-300 border-red-500/50';
+        return {
+          style: 'bg-red-950/80 text-red-300 border-red-500/50',
+          label: 'KERNEL BLOCKED',
+        };
+      case 'SIMULATED_BLOCK':
+        return {
+          style: 'bg-amber-950/80 text-amber-300 border-amber-500/50',
+          label: 'SIMULATED BLOCK',
+        };
       case 'ALERTED':
-        return 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+        return {
+          style: 'bg-yellow-950/80 text-yellow-300 border-yellow-500/50',
+          label: 'ALERTED',
+        };
       case 'RATE_LIMITED':
-        return 'bg-orange-950/80 text-orange-300 border-orange-500/50';
+        return {
+          style: 'bg-orange-950/80 text-orange-300 border-orange-500/50',
+          label: 'RATE LIMITED',
+        };
       default:
-        return 'bg-slate-900 text-slate-400 border-slate-800';
+        return {
+          style: 'bg-slate-900 text-slate-400 border-slate-800',
+          label: action,
+        };
     }
   };
 
@@ -131,7 +148,8 @@ export const EventTracker: React.FC<EventTrackerProps> = ({
             className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-300 focus:outline-none focus:border-cyan-500 text-xs cursor-pointer"
           >
             <option value="ALL">All Actions</option>
-            <option value="BLOCKED">Blocked</option>
+            <option value="SIMULATED_BLOCK">Simulated Block</option>
+            <option value="BLOCKED">Kernel Blocked</option>
             <option value="ALERTED">Alerted</option>
             <option value="RATE_LIMITED">Rate Limited</option>
             <option value="LOGGED">Logged</option>
@@ -200,9 +218,14 @@ export const EventTracker: React.FC<EventTrackerProps> = ({
                         {evt.signature}
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${getActionBadge(evt.actionTaken)}`}>
-                          {evt.actionTaken}
-                        </span>
+                        {(() => {
+                          const badge = getActionBadge(evt.actionTaken);
+                          return (
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badge.style}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
 

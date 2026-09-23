@@ -286,6 +286,8 @@ export default function App() {
           <NetworkControl
             platform={status.platform}
             rules={rules}
+            mode={status.mode}
+            onSelectMode={handleSelectMode}
             onAddRule={handleAddRule}
             onRemoveRule={handleRemoveRule}
             presetTargetIp={presetFirewallIp}

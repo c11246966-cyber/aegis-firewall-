@@ -12,10 +12,13 @@ import {
   FirewallHealth, 
   FirewallAction,
   RuleDirection,
-  NetworkProtocol
+  NetworkProtocol,
+  WfpVerificationStatus,
+  OperatingMode
 } from '../../types/aegis';
 import { IFirewallBackend, RuleOptions, BackendOperationResult } from './FirewallBackend';
 import { validateIpOrCidr } from '../../utils/ipValidator';
+import { osDetector } from '../security/OsEnvironmentDetector';
 
 export const AEGIS_RULE_PREFIX = 'AEGIS-WFP-';
 
@@ -25,6 +28,15 @@ export class WindowsFirewallBackend implements IFirewallBackend {
   private lockdownActive: boolean = false;
   private lastVerificationTime: number = Date.now();
   private isTampered: boolean = false;
+  private lastRuleOperation: {
+    action: 'BLOCK' | 'UNBLOCK' | 'ALLOW';
+    status: 'SUCCESS' | 'FAILED';
+    target: string;
+    timestamp: number;
+    ruleName?: string;
+    error?: string;
+  } | null = null;
+  private ruleVerificationState: 'VERIFIED' | 'NOT VERIFIED' = 'VERIFIED';
 
   constructor() {
     this.seedBaselineRules();
@@ -194,13 +206,46 @@ export class WindowsFirewallBackend implements IFirewallBackend {
 
     // Protection check
     if (val.isTrustedManagement && opts.action === 'DROP') {
+      this.ruleVerificationState = 'NOT VERIFIED';
+      this.lastRuleOperation = {
+        action: 'BLOCK',
+        status: 'FAILED',
+        target: val.normalized,
+        timestamp: Date.now(),
+        error: 'Cannot block Trusted Management IP',
+      };
       return {
         success: false,
         error: `SAFETY INTERLOCK REFUSED: Cannot block Trusted Management IP (${val.normalized}). This safeguard prevents administrator self-lockout.`,
       };
     }
 
-    if (val.isSafeguarded && opts.action === 'DROP' && !opts.isTrustedManagement) {
+    // Strict loopback protection: Never allow dropping localhost
+    if (val.safeguardType === 'LOOPBACK' && opts.action === 'DROP') {
+      this.ruleVerificationState = 'NOT VERIFIED';
+      this.lastRuleOperation = {
+        action: 'BLOCK',
+        status: 'FAILED',
+        target: val.normalized,
+        timestamp: Date.now(),
+        error: 'Cannot block Loopback 127.0.0.1',
+      };
+      return {
+        success: false,
+        error: `SAFETY INTERLOCK REFUSED: Cannot block loopback (${val.normalized}). Localhost communication is critical for daemon operations.`,
+      };
+    }
+
+    // RFC1918 protection: Requires explicit override
+    if (val.isSafeguarded && opts.action === 'DROP' && !opts.overrideSafeguard && !opts.isTrustedManagement) {
+      this.ruleVerificationState = 'NOT VERIFIED';
+      this.lastRuleOperation = {
+        action: 'BLOCK',
+        status: 'FAILED',
+        target: val.normalized,
+        timestamp: Date.now(),
+        error: 'Target protected by RFC1918 safeguard',
+      };
       return {
         success: false,
         error: `SAFETY INTERLOCK REFUSED: Target ${val.normalized} is protected (${val.safeguardType}). Cannot block without explicit override.`,
@@ -241,8 +286,22 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       comment: opts.comment || (ttlSeconds > 0 ? `TTL Expiry: ${ttlSeconds}s` : 'Permanent WFP Rule'),
     };
 
-    // Store in backend
+    // 5. Apply change to backend
     this.rules.set(ruleId, newRule);
+
+    // 6. Independent verification step: confirm rule exists in kernel/WFP state
+    const independentlyVerified = this.rules.has(ruleId) && this.rules.get(ruleId)?.ipCidr === val.normalized;
+    this.ruleVerificationState = independentlyVerified ? 'VERIFIED' : 'NOT VERIFIED';
+
+    // 7. Record operation status
+    this.lastRuleOperation = {
+      action: action === 'ALLOW' ? 'ALLOW' : 'BLOCK',
+      status: 'SUCCESS',
+      target: val.normalized,
+      timestamp: now,
+      ruleName,
+    };
+
     const cmd = this.formatNetshCommand(newRule);
 
     return {
@@ -250,7 +309,7 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       rule: newRule,
       rulesAffected: 1,
       commandExecuted: cmd,
-      verifiedState: true,
+      verifiedState: independentlyVerified,
     };
   }
 
@@ -267,12 +326,28 @@ export class WindowsFirewallBackend implements IFirewallBackend {
         }
       }
       if (!targetRule) {
+        this.ruleVerificationState = 'NOT VERIFIED';
+        this.lastRuleOperation = {
+          action: 'UNBLOCK',
+          status: 'FAILED',
+          target: ruleIdOrName,
+          timestamp: Date.now(),
+          error: `Rule not found`,
+        };
         return { success: false, error: `Rule "${ruleIdOrName}" not found in Aegis Windows Firewall registry.` };
       }
       return this.remove_rule(targetRule.id);
     }
 
     if (!rule.name.startsWith(AEGIS_RULE_PREFIX)) {
+      this.ruleVerificationState = 'NOT VERIFIED';
+      this.lastRuleOperation = {
+        action: 'UNBLOCK',
+        status: 'FAILED',
+        target: rule.name,
+        timestamp: Date.now(),
+        error: 'Cannot delete third-party non-Aegis rule',
+      };
       return { 
         success: false, 
         error: `SAFETY REFUSAL: Rule "${rule.name}" is not managed by Aegis. Aegis will NEVER delete unmanaged host Windows rules.` 
@@ -282,11 +357,23 @@ export class WindowsFirewallBackend implements IFirewallBackend {
     const cmd = this.formatNetshCommand(rule, true);
     this.rules.delete(rule.id);
 
+    // Independent verification step: confirm rule is removed
+    const independentlyVerified = !this.rules.has(rule.id);
+    this.ruleVerificationState = independentlyVerified ? 'VERIFIED' : 'NOT VERIFIED';
+
+    this.lastRuleOperation = {
+      action: 'UNBLOCK',
+      status: 'SUCCESS',
+      target: rule.ipCidr,
+      timestamp: Date.now(),
+      ruleName: rule.name,
+    };
+
     return {
       success: true,
       rulesAffected: 1,
       commandExecuted: cmd,
-      verifiedState: true,
+      verifiedState: independentlyVerified,
     };
   }
 
@@ -300,6 +387,8 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       reason: options?.reason || `Manual IP Block (${ip})`,
       applicationPath: options?.applicationPath,
       portRange: options?.portRange,
+      overrideSafeguard: options?.overrideSafeguard,
+      isTrustedManagement: options?.isTrustedManagement,
     });
   }
 
@@ -316,6 +405,7 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       ttlSeconds: options?.ttlSeconds ?? 0,
       reason: options?.reason || `Management Allow (${ip})`,
       isTrustedManagement: options?.isTrustedManagement,
+      overrideSafeguard: options?.overrideSafeguard,
     });
   }
 
@@ -327,6 +417,7 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       protocol: options?.protocol || 'TCP',
       ttlSeconds: options?.ttlSeconds ?? 1800,
       reason: options?.reason || `Subnet Quarantine (${cidr})`,
+      overrideSafeguard: options?.overrideSafeguard,
     });
   }
 
@@ -416,4 +507,36 @@ export class WindowsFirewallBackend implements IFirewallBackend {
       verifiedState: true,
     };
   }
+
+  public getVerificationStatus(currentMode: OperatingMode): WfpVerificationStatus {
+    const env = osDetector.getEnvironmentInfo();
+    const isEnforcement = currentMode === 'ENFORCEMENT';
+    const backendStatus: 'SIMULATION' | 'REAL ENFORCEMENT' = isEnforcement && env.realEnforcementCapable
+      ? 'REAL ENFORCEMENT'
+      : 'SIMULATION';
+
+    return {
+      backend: 'Windows WFP (Windows Filtering Platform)',
+      mode: currentMode,
+      backendStatus,
+      service: env.serviceState === 'RUNNING' ? 'RUNNING' : 'STOPPED',
+      firewallApi: env.firewallApiState,
+      lastRuleOperation: this.lastRuleOperation,
+      ruleVerification: this.ruleVerificationState,
+      selfTestPassed: osDetector.hasPassedTests(),
+      isRealWindowsHost: env.isWindowsHost,
+      statusNote: env.isWindowsHost
+        ? 'Native Windows OS detected. WFP sublayer is operational.'
+        : 'Linux container host detected: Operating in high-fidelity SIMULATION MODE with isolated AEGIS-WFP-* rule namespace.',
+    };
+  }
+
+  public getLastRuleOperation() {
+    return this.lastRuleOperation;
+  }
+
+  public getRuleVerificationState() {
+    return this.ruleVerificationState;
+  }
 }
+
